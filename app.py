@@ -128,4 +128,76 @@ df = base.copy()
 if date_range and isinstance(date_range, (list, tuple)) and len(date_range) == 2:
     d1, d2 = date_range
     dcol = pd.to_datetime(df["Date"], errors="coerce")
-    df = df[(dcol >= pd.to_datetime(d1)) & (dco_]()
+    df = df[(dcol >= pd.to_datetime(d1)) & (dcol <= pd.to_datetime(d2))]
+
+for col, sel in [
+    ("Customer", sel_customer),
+    ("Project Name", sel_project),
+    ("Item Name", sel_item),
+    ("Source", sel_source),
+    ("Time Group", sel_timegrp),
+    ("Location", sel_location),
+]:
+    if sel:
+        df = df[df[col].isin(sel)]
+
+# Utled måned + tallverdi
+df["Month"] = pd.to_datetime(df["Date"], errors="coerce").dt.to_period("M").astype(str)
+df["Quantity_num"] = safe_numeric(df["Quantity"])
+
+# ---------- Resultater ----------
+st.subheader("Ledger-tabell (filtrert)")
+show_cols = [
+    "Date", "Customer", "Project Name", "Source", "Item Name",
+    "Quantity", "Unit of measure", "Time Group", "Location"
+]
+st.dataframe(df[show_cols].reset_index(drop=True), use_container_width=True)
+
+st.subheader("Pivot: Sum Quantity per måned × Time Group")
+pivot = (
+    pd.pivot_table(
+        df,
+        index="Month",
+        columns="Time Group",
+        values="Quantity_num",
+        aggfunc="sum",
+        fill_value=0,
+    )
+    .sort_index()
+)
+st.dataframe(pivot, use_container_width=True)
+
+st.subheader("Trend: Quantity per måned")
+trend = df.groupby("Month", as_index=False)["Quantity_num"].sum().sort_values("Month")
+st.line_chart(trend.set_index("Month"))
+
+# ---------- Nedlasting ----------
+def excel_bytes(sheets_dict):
+    buf = io.BytesIO()
+    with pd.ExcelWriter(buf, engine="xlsxwriter") as writer:
+        for name, d in sheets_dict.items():
+            # Excel-arknavn maks 31 tegn
+            d.to_excel(writer, sheet_name=name[:31], index=False)
+    buf.seek(0)
+    return buf
+
+c1, c2 = st.columns(2)
+with c1:
+    st.download_button(
+        "Last ned filtrert tabell (CSV)",
+        data=df.to_csv(index=False).encode("utf-8"),
+        file_name="ledger_filtered.csv",
+        mime="text/csv",
+        use_container_width=True,
+    )
+with c2:
+    xbuf = excel_bytes({"ledger_filtered": df, "pivot": pivot.reset_index()})
+    st.download_button(
+        "Last ned Excel (tabell + pivot)",
+        data=xbuf,
+        file_name="ledger_output.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        use_container_width=True,
+    )
+
+st.success("Ferdig! Bruk filtrene i venstre side for å se ulike utsnitt.")
